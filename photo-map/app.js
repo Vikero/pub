@@ -1,10 +1,8 @@
-// app.js
-
 import { Renderer } from "./render.js";
 import { Calibration } from "./calibration.js";
 
-// --- DOM ---
-const canvas = document.getElementById("canvas");
+// --- DOM Elements ---
+const canvas = document.getElementById("mapCanvas");
 const fileInput = document.getElementById("fileInput");
 const statusEl = document.getElementById("status");
 
@@ -13,57 +11,37 @@ const renderer = new Renderer(canvas);
 const calibration = new Calibration();
 
 // --- App state ---
+let calibrationStep = 0; // 0 = first point, 1 = second point
 let currentGPS = null;
-let phase = "idle";
-// idle → calibrateA → calibrateB → navigate
 
-// --- GPS ---
-navigator.geolocation.watchPosition(
-	(pos) => {
-		currentGPS = {
-			lat: pos.coords.latitude,
-			lon: pos.coords.longitude,
-		};
+// --- GPS smoothing ---
+let smoothedLat = null;
+let smoothedLon = null;
+const GPS_ALPHA = 0.25;
 
-		if (phase === "navigate") {
-			const projected = calibration.project(currentGPS);
-			if (projected) updateMarkers(projected);
-		}
-	},
-	(err) => {
-		console.warn("GPS error:", err);
-		status("GPS unavailable");
-	},
-	{
-		enableHighAccuracy: true,
-		maximumAge: 1000,
-	}
-);
-
-// --- Image load ---
+// --- Load image ---
 fileInput.addEventListener("change", (e) => {
 	const file = e.target.files[0];
 	if (!file) return;
 
 	const img = new Image();
 	img.onload = () => {
-		renderer.setImage(img);
+		renderer.setImage(img); // fits image to screen
 		calibration.reset();
-		phase = "calibrateA";
-		updateMarkers();
-		status("Tap first point while standing there");
+		calibrationStep = 0;
+		status("Tap first calibration point while standing there");
 	};
 	img.src = URL.createObjectURL(file);
 });
 
-// --- Canvas tap (calibration) ---
+// --- Calibration taps ---
 canvas.addEventListener("click", (e) => {
 	if (!currentGPS) {
-		status("Waiting for GPS fix…");
+		status("Waiting for GPS fix...");
 		return;
 	}
 
-	if (phase !== "calibrateA" && phase !== "calibrateB") return;
+	if (!renderer.image) return;
 
 	const rect = canvas.getBoundingClientRect();
 	const screenPt = {
@@ -73,56 +51,61 @@ canvas.addEventListener("click", (e) => {
 
 	const imagePt = renderer.screenToImage(screenPt);
 
-	if (phase === "calibrateA") {
+	if (calibrationStep === 0) {
 		calibration.setPointA(imagePt, currentGPS);
-		phase = "calibrateB";
-		updateMarkers();
+		calibrationStep = 1;
+		renderer.addCalibrationMarker(imagePt);
 		status("Walk to second point and tap again");
-	} else if (phase === "calibrateB") {
+	} else if (calibrationStep === 1) {
 		calibration.setPointB(imagePt, currentGPS);
-		phase = "navigate";
-		updateMarkers();
-		status("Navigation active");
+		calibrationStep = 2;
+		calibration.compute();
+		renderer.addCalibrationMarker(imagePt);
+		status("Calibration complete. Navigation active");
 	}
+
+	renderer.draw();
 });
 
-// --- Marker management ---
-function updateMarkers(projected = null) {
-	const markers = [];
+// --- GPS ---
+navigator.geolocation.watchPosition(
+	(pos) => {
+		const lat = pos.coords.latitude;
+		const lon = pos.coords.longitude;
 
-	if (calibration.pointA) {
-		markers.push({
-			x: calibration.pointA.image.x,
-			y: calibration.pointA.image.y,
-			color: "blue",
-		});
+		// EMA smoothing
+		if (smoothedLat === null) {
+			smoothedLat = lat;
+			smoothedLon = lon;
+		} else {
+			smoothedLat = GPS_ALPHA * lat + (1 - GPS_ALPHA) * smoothedLat;
+			smoothedLon = GPS_ALPHA * lon + (1 - GPS_ALPHA) * smoothedLon;
+		}
+
+		currentGPS = { lat: smoothedLat, lon: smoothedLon };
+
+		if (calibration.ready) {
+			const imgPt = calibration.project(currentGPS);
+			if (imgPt) renderer.setLivePosition(imgPt);
+		}
+	},
+	(err) => {
+		console.warn("GPS error:", err.message);
+		status("GPS unavailable");
+	},
+	{
+		enableHighAccuracy: true,
+		maximumAge: 1000,
+		timeout: 10000,
 	}
-
-	if (calibration.pointB) {
-		markers.push({
-			x: calibration.pointB.image.x,
-			y: calibration.pointB.image.y,
-			color: "green",
-		});
-	}
-
-	if (projected) {
-		markers.push({
-			x: projected.x,
-			y: projected.y,
-			color: "red",
-		});
-	}
-
-	renderer.setMarkers(markers);
-}
+);
 
 // --- Status helper ---
 function status(msg) {
 	statusEl.textContent = msg;
 }
 
-// --- Service worker (safe on GitHub Pages / mobile) ---
+// --- Service Worker ---
 if ("serviceWorker" in navigator) {
 	navigator.serviceWorker.register("./service-worker.js").catch(() => {});
 }
