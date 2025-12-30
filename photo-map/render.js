@@ -6,16 +6,23 @@ export class Renderer {
 		this.ctx = canvas.getContext("2d");
 
 		this.image = null;
+
 		this.scale = 1;
 		this.offsetX = 0;
 		this.offsetY = 0;
 
 		this.dpr = window.devicePixelRatio || 1;
 
-		this.marker = null;
+		this.markers = []; // { x, y, color }
+
+		this.isPanning = false;
+		this.lastPointer = null;
+		this.lastPinchDist = null;
 
 		this.resize();
 		window.addEventListener("resize", () => this.resize());
+
+		this.attachEvents();
 	}
 
 	resize() {
@@ -28,14 +35,21 @@ export class Renderer {
 
 	setImage(img) {
 		this.image = img;
-		this.scale = 1;
-		this.offsetX = 0;
-		this.offsetY = 0;
+
+		// --- Fit image to canvas ---
+		const rect = this.canvas.getBoundingClientRect();
+		const scaleX = rect.width / img.width;
+		const scaleY = rect.height / img.height;
+		this.scale = Math.min(scaleX, scaleY);
+
+		this.offsetX = (rect.width - img.width * this.scale) / 2;
+		this.offsetY = (rect.height - img.height * this.scale) / 2;
+
 		this.draw();
 	}
 
-	setMarker(pt) {
-		this.marker = pt;
+	setMarkers(markers) {
+		this.markers = markers;
 		this.draw();
 	}
 
@@ -65,12 +79,58 @@ export class Renderer {
 		ctx.drawImage(this.image, 0, 0);
 		ctx.restore();
 
-		if (this.marker) {
-			const p = this.imageToScreen(this.marker);
+		// --- Markers ---
+		for (const m of this.markers) {
+			const p = this.imageToScreen(m);
 			ctx.beginPath();
 			ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
-			ctx.fillStyle = "red";
+			ctx.fillStyle = m.color;
 			ctx.fill();
 		}
+	}
+
+	attachEvents() {
+		// Mouse wheel zoom
+		this.canvas.addEventListener("wheel", (e) => {
+			e.preventDefault();
+			const zoom = e.deltaY < 0 ? 1.1 : 0.9;
+			this.zoomAt({ x: e.offsetX, y: e.offsetY }, zoom);
+		});
+
+		// Pointer events (pan + pinch)
+		this.canvas.addEventListener("pointerdown", (e) => {
+			this.canvas.setPointerCapture(e.pointerId);
+			this.isPanning = true;
+			this.lastPointer = { x: e.clientX, y: e.clientY };
+		});
+
+		this.canvas.addEventListener("pointermove", (e) => {
+			if (!this.isPanning) return;
+
+			const dx = e.clientX - this.lastPointer.x;
+			const dy = e.clientY - this.lastPointer.y;
+
+			this.offsetX += dx;
+			this.offsetY += dy;
+
+			this.lastPointer = { x: e.clientX, y: e.clientY };
+			this.draw();
+		});
+
+		this.canvas.addEventListener("pointerup", () => {
+			this.isPanning = false;
+			this.lastPointer = null;
+		});
+	}
+
+	zoomAt(screenPt, factor) {
+		const before = this.screenToImage(screenPt);
+		this.scale *= factor;
+		const after = this.screenToImage(screenPt);
+
+		this.offsetX += (after.x - before.x) * this.scale;
+		this.offsetY += (after.y - before.y) * this.scale;
+
+		this.draw();
 	}
 }
