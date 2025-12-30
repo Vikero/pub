@@ -1,136 +1,136 @@
-// render.js
-
 export class Renderer {
-	constructor(canvas) {
+	constructor(canvas, image) {
 		this.canvas = canvas;
 		this.ctx = canvas.getContext("2d");
+		this.image = image;
 
-		this.image = null;
-
-		this.scale = 1;
 		this.offsetX = 0;
 		this.offsetY = 0;
+		this.scale = 1;
 
-		this.dpr = window.devicePixelRatio || 1;
-
-		this.markers = []; // { x, y, color }
-
-		this.isPanning = false;
-		this.lastPointer = null;
-		this.lastPinchDist = null;
+		this.pointers = new Map();
+		this.lastPinchDistance = null;
 
 		this.resize();
 		window.addEventListener("resize", () => this.resize());
 
-		this.attachEvents();
+		this.bindEvents();
+		this.draw();
 	}
 
 	resize() {
-		const rect = this.canvas.getBoundingClientRect();
-		this.canvas.width = rect.width * this.dpr;
-		this.canvas.height = rect.height * this.dpr;
-		this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-		this.draw();
-	}
+		this.canvas.width = window.innerWidth;
+		this.canvas.height = window.innerHeight;
 
-	setImage(img) {
-		this.image = img;
-
-		// --- Fit image to canvas ---
-		const rect = this.canvas.getBoundingClientRect();
-		const scaleX = rect.width / img.width;
-		const scaleY = rect.height / img.height;
+		// Fit image to screen on first load
+		const scaleX = this.canvas.width / this.image.width;
+		const scaleY = this.canvas.height / this.image.height;
 		this.scale = Math.min(scaleX, scaleY);
 
-		this.offsetX = (rect.width - img.width * this.scale) / 2;
-		this.offsetY = (rect.height - img.height * this.scale) / 2;
+		this.offsetX = (this.canvas.width - this.image.width * this.scale) / 2;
+		this.offsetY = (this.canvas.height - this.image.height * this.scale) / 2;
 
 		this.draw();
 	}
 
-	setMarkers(markers) {
-		this.markers = markers;
-		this.draw();
-	}
-
-	imageToScreen(pt) {
-		return {
-			x: pt.x * this.scale + this.offsetX,
-			y: pt.y * this.scale + this.offsetY,
-		};
-	}
-
-	screenToImage(pt) {
-		return {
-			x: (pt.x - this.offsetX) / this.scale,
-			y: (pt.y - this.offsetY) / this.scale,
-		};
-	}
-
-	draw() {
-		const ctx = this.ctx;
-		ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-
-		if (!this.image) return;
-
-		ctx.save();
-		ctx.translate(this.offsetX, this.offsetY);
-		ctx.scale(this.scale, this.scale);
-		ctx.drawImage(this.image, 0, 0);
-		ctx.restore();
-
-		// --- Markers ---
-		for (const m of this.markers) {
-			const p = this.imageToScreen(m);
-			ctx.beginPath();
-			ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
-			ctx.fillStyle = m.color;
-			ctx.fill();
-		}
-	}
-
-	attachEvents() {
-		// Mouse wheel zoom
-		this.canvas.addEventListener("wheel", (e) => {
-			e.preventDefault();
-			const zoom = e.deltaY < 0 ? 1.1 : 0.9;
-			this.zoomAt({ x: e.offsetX, y: e.offsetY }, zoom);
-		});
-
-		// Pointer events (pan + pinch)
+	bindEvents() {
 		this.canvas.addEventListener("pointerdown", (e) => {
 			this.canvas.setPointerCapture(e.pointerId);
-			this.isPanning = true;
-			this.lastPointer = { x: e.clientX, y: e.clientY };
+			this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 		});
 
 		this.canvas.addEventListener("pointermove", (e) => {
-			if (!this.isPanning) return;
+			if (!this.pointers.has(e.pointerId)) return;
 
-			const dx = e.clientX - this.lastPointer.x;
-			const dy = e.clientY - this.lastPointer.y;
+			const prev = this.pointers.get(e.pointerId);
+			const curr = { x: e.clientX, y: e.clientY };
+			this.pointers.set(e.pointerId, curr);
 
-			this.offsetX += dx;
-			this.offsetY += dy;
+			// PAN
+			if (this.pointers.size === 1) {
+				const dx = curr.x - prev.x;
+				const dy = curr.y - prev.y;
+				this.offsetX += dx;
+				this.offsetY += dy;
+				this.draw();
+			}
 
-			this.lastPointer = { x: e.clientX, y: e.clientY };
-			this.draw();
+			// PINCH ZOOM
+			if (this.pointers.size === 2) {
+				const pts = [...this.pointers.values()];
+				const dx = pts[0].x - pts[1].x;
+				const dy = pts[0].y - pts[1].y;
+				const dist = Math.hypot(dx, dy);
+
+				if (this.lastPinchDistance) {
+					const zoomFactor = dist / this.lastPinchDistance;
+
+					const midX = (pts[0].x + pts[1].x) / 2;
+					const midY = (pts[0].y + pts[1].y) / 2;
+
+					const rect = this.canvas.getBoundingClientRect();
+					this.zoomAt(
+						{
+							x: midX - rect.left,
+							y: midY - rect.top,
+						},
+						zoomFactor
+					);
+				}
+
+				this.lastPinchDistance = dist;
+			}
 		});
 
-		this.canvas.addEventListener("pointerup", () => {
-			this.isPanning = false;
-			this.lastPointer = null;
+		this.canvas.addEventListener("pointerup", (e) => {
+			this.pointers.delete(e.pointerId);
+			if (this.pointers.size < 2) {
+				this.lastPinchDistance = null;
+			}
 		});
+
+		this.canvas.addEventListener("pointercancel", (e) => {
+			this.pointers.clear();
+			this.lastPinchDistance = null;
+		});
+
+		// Desktop wheel zoom (optional but correct)
+		this.canvas.addEventListener(
+			"wheel",
+			(e) => {
+				e.preventDefault();
+				const factor = e.deltaY < 0 ? 1.1 : 0.9;
+				this.zoomAt({ x: e.offsetX, y: e.offsetY }, factor);
+			},
+			{ passive: false }
+		);
 	}
 
-	zoomAt(screenPt, factor) {
-		const before = this.screenToImage(screenPt);
-		this.scale *= factor;
-		const after = this.screenToImage(screenPt);
+	zoomAt(point, factor) {
+		const wx = (point.x - this.offsetX) / this.scale;
+		const wy = (point.y - this.offsetY) / this.scale;
 
-		this.offsetX += (after.x - before.x) * this.scale;
-		this.offsetY += (after.y - before.y) * this.scale;
+		this.scale *= factor;
+
+		this.offsetX = point.x - wx * this.scale;
+		this.offsetY = point.y - wy * this.scale;
 
 		this.draw();
+	}
+
+	draw() {
+		this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+		this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+		this.ctx.setTransform(
+			this.scale,
+			0,
+			0,
+			this.scale,
+			this.offsetX,
+			this.offsetY
+		);
+
+		this.ctx.drawImage(this.image, 0, 0);
 	}
 }
