@@ -19,10 +19,12 @@ export class Renderer {
 	}
 
 	resize() {
+		if (!this.image) return; // <-- skip if no image yet
+
 		this.canvas.width = window.innerWidth;
 		this.canvas.height = window.innerHeight;
 
-		// Fit image to screen on first load
+		// Fit image to screen
 		const scaleX = this.canvas.width / this.image.width;
 		const scaleY = this.canvas.height / this.image.height;
 		this.scale = Math.min(scaleX, scaleY);
