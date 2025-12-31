@@ -1,47 +1,64 @@
 import { Renderer } from "./render.js";
 import { Calibration } from "./calibration.js";
+import { GPSSmoother } from "./gpsSmoother.js";
 
-// --- DOM Elements ---
+// --- DOM ---
 const canvas = document.getElementById("mapCanvas");
 const fileInput = document.getElementById("fileInput");
 const statusEl = document.getElementById("status");
 
-// --- Core objects ---
+// --- Core ---
 const renderer = new Renderer(canvas);
 const calibration = new Calibration();
+const gpsSmoother = new GPSSmoother(5); // 5-point buffer for walking
 
 // --- App state ---
-let calibrationStep = 0; // 0 = first point, 1 = second point
+// calibrationStep:
+// 0 = waiting for point A
+// 1 = waiting for point B
+// 2 = calibrated, navigating
+let calibrationStep = 0;
 let currentGPS = null;
 
-// --- GPS smoothing ---
-let smoothedLat = null;
-let smoothedLon = null;
-const GPS_ALPHA = 0.25;
+// --- Helpers ---
+function status(msg) {
+	statusEl.textContent = msg;
+}
 
-// --- Load image ---
+// --- Image load ---
 fileInput.addEventListener("change", (e) => {
 	const file = e.target.files[0];
 	if (!file) return;
 
 	const img = new Image();
 	img.onload = () => {
-		renderer.setImage(img); // fits image to screen
+		renderer.setImage(img);
+
+		// Reset state
 		calibration.reset();
+		gpsSmoother.reset();
 		calibrationStep = 0;
+		currentGPS = null;
+
+		// Clear markers & position
+		renderer.setMarkers([]);
+		renderer.setLivePosition(null);
+
 		status("Tap first calibration point while standing there");
 	};
+
 	img.src = URL.createObjectURL(file);
 });
 
 // --- Calibration taps ---
 canvas.addEventListener("click", (e) => {
 	if (!currentGPS) {
-		status("Waiting for GPS fix...");
+		status("Waiting for GPS fix…");
 		return;
 	}
 
 	if (!renderer.image) return;
+	if (calibrationStep > 1) return; // already calibrated
 
 	const rect = canvas.getBoundingClientRect();
 	const screenPt = {
@@ -53,40 +70,47 @@ canvas.addEventListener("click", (e) => {
 
 	if (calibrationStep === 0) {
 		calibration.setPointA(imagePt, currentGPS);
+		renderer.addCalibrationMarker(imagePt);
 		calibrationStep = 1;
-		renderer.addCalibrationMarker(imagePt);
 		status("Walk to second point and tap again");
-	} else if (calibrationStep === 1) {
-		calibration.setPointB(imagePt, currentGPS);
-		calibrationStep = 2;
-		calibration.compute();
-		renderer.addCalibrationMarker(imagePt);
-		status("Calibration complete. Navigation active");
+		return;
 	}
 
-	renderer.draw();
+	if (calibrationStep === 1) {
+		calibration.setPointB(imagePt, currentGPS);
+		calibration.compute();
+		renderer.addCalibrationMarker(imagePt);
+		calibrationStep = 2;
+		status("Calibration complete. Navigation active");
+	}
 });
 
 // --- GPS ---
 navigator.geolocation.watchPosition(
 	(pos) => {
-		const lat = pos.coords.latitude;
-		const lon = pos.coords.longitude;
+		const speed = pos.coords.speed ?? 0; // m/s
+		const MAX_WALK_SPEED = 2.5; // ~9 km/h
 
-		// EMA smoothing
-		if (smoothedLat === null) {
-			smoothedLat = lat;
-			smoothedLon = lon;
-		} else {
-			smoothedLat = GPS_ALPHA * lat + (1 - GPS_ALPHA) * smoothedLat;
-			smoothedLon = GPS_ALPHA * lon + (1 - GPS_ALPHA) * smoothedLon;
-		}
+		// Ignore bike / car movement
+		if (speed > MAX_WALK_SPEED) return;
 
-		currentGPS = { lat: smoothedLat, lon: smoothedLon };
+		const rawGPS = {
+			lat: pos.coords.latitude,
+			lon: pos.coords.longitude,
+		};
 
-		if (calibration.ready) {
-			const imgPt = calibration.project(currentGPS);
-			if (imgPt) renderer.setLivePosition(imgPt);
+		gpsSmoother.add(rawGPS);
+		const smoothed = gpsSmoother.getAveraged();
+		if (!smoothed) return;
+
+		currentGPS = smoothed;
+
+		// Only project after calibration
+		if (calibrationStep === 2) {
+			const projected = calibration.project(currentGPS);
+			if (projected) {
+				renderer.setLivePosition(projected);
+			}
 		}
 	},
 	(err) => {
@@ -100,12 +124,7 @@ navigator.geolocation.watchPosition(
 	}
 );
 
-// --- Status helper ---
-function status(msg) {
-	statusEl.textContent = msg;
-}
-
-// --- Service Worker ---
+// --- Service worker ---
 if ("serviceWorker" in navigator) {
 	navigator.serviceWorker.register("./service-worker.js").catch(() => {});
 }
