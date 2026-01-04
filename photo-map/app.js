@@ -1,6 +1,7 @@
 import { Renderer } from "./render.js";
 import { Calibration } from "./calibration.js";
 import { GPSSmoother } from "./gpsSmoother.js";
+import { computePointAQuality } from "./calibrationValidation.js";
 
 // --- DOM ---
 const canvas = document.getElementById("mapCanvas");
@@ -10,19 +11,53 @@ const statusEl = document.getElementById("status");
 // --- Core ---
 const renderer = new Renderer(canvas);
 const calibration = new Calibration();
-const gpsSmoother = new GPSSmoother(5); // 5-point buffer for walking
+const gpsSmoother = new GPSSmoother(5);
 
 // --- App state ---
-// calibrationStep:
-// 0 = waiting for point A
-// 1 = waiting for point B
-// 2 = calibrated, navigating
+// 0 = waiting for A
+// 1 = waiting for B
+// 2 = navigating
+// 3 = editing A
+// 4 = editing B
+// 5 = validating A (Phase 4.1)
+// 6 = refining with C (Phase 4.2)
 let calibrationStep = 0;
+
 let currentGPS = null;
+let gpsSamples = []; // buffer for QA / QC
 
 // --- Helpers ---
 function status(msg) {
 	statusEl.textContent = msg;
+}
+
+function updateMarkers() {
+	const markers = [];
+
+	if (calibration.pointA) {
+		markers.push({
+			id: "A",
+			x: calibration.pointA.image.x,
+			y: calibration.pointA.image.y,
+			color: "green",
+		});
+	}
+
+	if (calibration.pointB) {
+		markers.push({
+			id: "B",
+			x: calibration.pointB.image.x,
+			y: calibration.pointB.image.y,
+			color: "blue",
+		});
+	}
+
+	renderer.setMarkers(markers);
+}
+
+function collectGPS(sample) {
+	gpsSamples.push(sample);
+	if (gpsSamples.length > 30) gpsSamples.shift();
 }
 
 // --- Image load ---
@@ -33,32 +68,20 @@ fileInput.addEventListener("change", (e) => {
 	const img = new Image();
 	img.onload = () => {
 		renderer.setImage(img);
-
-		// Reset state
 		calibration.reset();
 		gpsSmoother.reset();
 		calibrationStep = 0;
 		currentGPS = null;
-
-		// Clear markers & position
 		renderer.setMarkers([]);
 		renderer.setLivePosition(null);
-
 		status("Tap first calibration point while standing there");
 	};
-
 	img.src = URL.createObjectURL(file);
 });
 
-// --- Calibration taps ---
+// --- Canvas click ---
 canvas.addEventListener("click", (e) => {
-	if (!currentGPS) {
-		status("Waiting for GPS fix…");
-		return;
-	}
-
 	if (!renderer.image) return;
-	if (calibrationStep > 1) return; // already calibrated
 
 	const rect = canvas.getBoundingClientRect();
 	const screenPt = {
@@ -66,12 +89,27 @@ canvas.addEventListener("click", (e) => {
 		y: e.clientY - rect.top,
 	};
 
+	// Marker selection (edit mode)
+	const hit = renderer.getMarkerAt(screenPt);
+	if (hit && calibrationStep === 2) {
+		calibrationStep = hit.id === "A" ? 3 : 4;
+		gpsSmoother.reset();
+		status(`Tap new location for point ${hit.id}`);
+		return;
+	}
+
+	if (!currentGPS) {
+		status("Waiting for GPS fix…");
+		return;
+	}
+
 	const imagePt = renderer.screenToImage(screenPt);
 
+	// Initial calibration
 	if (calibrationStep === 0) {
 		calibration.setPointA(imagePt, currentGPS);
-		renderer.addCalibrationMarker(imagePt);
 		calibrationStep = 1;
+		updateMarkers();
 		status("Walk to second point and tap again");
 		return;
 	}
@@ -79,9 +117,30 @@ canvas.addEventListener("click", (e) => {
 	if (calibrationStep === 1) {
 		calibration.setPointB(imagePt, currentGPS);
 		calibration.compute();
-		renderer.addCalibrationMarker(imagePt);
+
+		gpsSamples.length = 0; // reset buffer
+		calibrationStep = 5; // VALIDATE A
+		status("Stand still on point A to validate calibration");
+		updateMarkers();
+		return;
+	}
+
+	// Editing A or B
+	if (calibrationStep === 3) {
+		calibration.setPointA(imagePt, currentGPS);
+		calibration.compute();
 		calibrationStep = 2;
-		status("Calibration complete. Navigation active");
+		updateMarkers();
+		status("Point A updated");
+		return;
+	}
+
+	if (calibrationStep === 4) {
+		calibration.setPointB(imagePt, currentGPS);
+		calibration.compute();
+		calibrationStep = 2;
+		updateMarkers();
+		status("Point B updated");
 	}
 });
 
@@ -94,22 +153,37 @@ navigator.geolocation.watchPosition(
 		// Ignore bike / car movement
 		if (speed > MAX_WALK_SPEED) return;
 
-		const rawGPS = {
+		gpsSmoother.add({
 			lat: pos.coords.latitude,
 			lon: pos.coords.longitude,
-		};
+		});
 
-		gpsSmoother.add(rawGPS);
-		const smoothed = gpsSmoother.getAveraged();
-		if (!smoothed) return;
+		const avg = gpsSmoother.getAveraged();
+		if (!avg) return;
 
-		currentGPS = smoothed;
+		currentGPS = avg;
+		collectGPS(avg);
 
-		// Only project after calibration
 		if (calibrationStep === 2) {
 			const projected = calibration.project(currentGPS);
-			if (projected) {
-				renderer.setLivePosition(projected);
+			if (projected) renderer.setLivePosition(projected);
+		}
+
+		if (calibrationStep === 5 && gpsSamples.length >= 20) {
+			const qa = computePointAQuality({
+				gpsSamples,
+				pointAWorld: calibration.pointA.gps,
+				pointAImage: calibration.pointA.image,
+				projectWorldToImage: calibration.project.bind(calibration),
+			});
+
+			status(`Point A quality: ${(qa.QA * 100).toFixed(0)}%`);
+
+			if (qa.locked) {
+				calibration.lockPointA?.(); // optional method
+				calibrationStep = 2; // navigation
+				gpsSamples.length = 0;
+				status("Calibration locked. Navigation active");
 			}
 		}
 	},
