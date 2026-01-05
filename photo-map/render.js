@@ -64,17 +64,50 @@ export class Renderer {
 	resize() {
 		if (!this.image) return;
 
-		this.canvas.width = window.innerWidth;
-		this.canvas.height = window.innerHeight;
+		const rect = this.canvas.getBoundingClientRect();
 
-		const scaleX = this.canvas.width / this.image.width;
-		const scaleY = this.canvas.height / this.image.height;
+		// On mobile resume, layout can report 0x0 briefly. Don't trash the canvas.
+		if (!rect.width || !rect.height) {
+			// Try again next frame when layout stabilizes
+			requestAnimationFrame(() => this.resize());
+			return;
+		}
+
+		const dpr = window.devicePixelRatio || 1;
+
+		this.canvas.width = Math.round(rect.width * dpr);
+		this.canvas.height = Math.round(rect.height * dpr);
+
+		this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+		this.ctx.imageSmoothingEnabled = true;
+
+		const scaleX = rect.width / this.image.width;
+		const scaleY = rect.height / this.image.height;
 		this.scale = Math.min(scaleX, scaleY);
 
-		this.offsetX = (this.canvas.width - this.image.width * this.scale) / 2;
-		this.offsetY = (this.canvas.height - this.image.height * this.scale) / 2;
+		this.offsetX = (rect.width - this.image.width * this.scale) / 2;
+		this.offsetY = (rect.height - this.image.height * this.scale) / 2;
 
 		this.draw();
+	}
+
+	resetContext() {
+		this.ctx = this.canvas.getContext("2d");
+		this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+		this.ctx.imageSmoothingEnabled = true;
+	}
+
+	rebuild() {
+		if (!this.image) return;
+
+		// Reacquire context first (some browsers replace the backing store/context on resume)
+		this.resetContext();
+
+		// Then resize to recreate bitmap + set DPR transform on the *current* ctx
+		this.resize();
+
+		// resize() already calls draw(), but keeping explicit draw is OK if you want:
+		// this.draw();
 	}
 
 	bindEvents() {
@@ -145,9 +178,16 @@ export class Renderer {
 	draw() {
 		if (!this.image) return;
 
+		// If image is not in a drawable state, don't clear to black.
+		// (Prevents "clear -> drawImage draws nothing -> black canvas")
+		if (!this.image.complete || this.image.naturalWidth === 0) return;
+
+		this.ctx.save();
 		this.ctx.setTransform(1, 0, 0, 1, 0, 0);
 		this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+		this.ctx.restore();
 
+		// ----- image space -----
 		this.ctx.setTransform(
 			this.scale,
 			0,
@@ -181,9 +221,14 @@ export class Renderer {
 			this.ctx.fill();
 		}
 
-		// draw overlays in screen space
+		// ----- screen space -----
 		if (typeof this.afterDraw === "function") {
+			this.ctx.save();
+			// Reset to CSS pixel space (because resize() setTransform(dpr,...) already)
+			// In draw() we overwrote it with image transform, so restore identity for overlays.
+			this.ctx.setTransform(1, 0, 0, 1, 0, 0);
 			this.afterDraw(this.ctx);
+			this.ctx.restore();
 		}
 	}
 }

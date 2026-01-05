@@ -6,6 +6,10 @@ import {
 	computePointAQuality,
 	computePointAStabilityQuality,
 } from "./calibrationValidation.js";
+import {
+	registerLifecycleRedraw,
+	createQAOverlayController,
+} from "./uiLifecycle.js";
 
 // --- DOM ---
 const canvas = document.getElementById("mapCanvas");
@@ -101,6 +105,21 @@ function collectGPS(sample) {
 	if (gpsSamples.length > 30) gpsSamples.shift();
 }
 
+// --- QA overlay controller (replaces updateQAOverlay) ---
+const qaOverlay = createQAOverlayController({
+	overlays,
+	renderer,
+	getStep: () => calibrationStep,
+	getSamplesCount: () => gpsSamples.length,
+	getQAStartTime: () => qaStartTime,
+	getLastQAResult: () => lastQAResult,
+	minSamples: 20,
+});
+
+qaOverlay.update();
+
+let loadedImgEl = null;
+
 // --- Image load ---
 fileInput.addEventListener("change", (e) => {
 	const file = e.target.files[0];
@@ -108,17 +127,97 @@ fileInput.addEventListener("change", (e) => {
 
 	const img = new Image();
 	img.onload = () => {
+		loadedImgEl = img;
+
 		renderer.setImage(img);
 		calibration.reset();
 		gpsSmoother.reset();
 		calibrationStep = 0;
 		currentGPS = null;
+
+		gpsSamples.length = 0;
+		qaStartTime = 0;
+		lastQAResult = null;
+
 		renderer.setMarkers([]);
 		renderer.setLivePosition(null);
+
+		qaOverlay.update();
+		renderer.draw();
+
 		status("Tap first calibration point while standing there");
 	};
 	img.src = URL.createObjectURL(file);
 });
+
+async function decodeIfPossible(img) {
+	if (!img) return;
+	if (typeof img.decode === "function") {
+		try {
+			await img.decode();
+		} catch {
+			// ignore
+		}
+	}
+}
+
+function rebuildFromState(reason) {
+	if (!renderer.image) return;
+
+	updateMarkers();
+
+	if (
+		currentGPS &&
+		(calibrationStep === 2 || calibrationStep === 5 || calibrationStep === 7)
+	) {
+		const projected = calibration.project(currentGPS);
+		renderer.setLivePosition(projected || null);
+	} else {
+		renderer.setLivePosition(null);
+	}
+
+	qaOverlay.update();
+
+	// Hard redraw
+	renderer.draw();
+	updateDebugOverlay();
+}
+
+// --- Lifecycle-aware redraw (pre-persistence) ---
+function lifecycleDebug(reason) {
+	// Shows in your debug overlay; safe without console.
+	const rect = canvas.getBoundingClientRect();
+	setDebug(
+		[
+			`lifecycle: ${reason}`,
+			`visibility: ${document.visibilityState}`,
+			`rect: ${Math.round(rect.width)}x${Math.round(rect.height)}`,
+			`canvas: ${canvas.width}x${canvas.height}`,
+			`dpr: ${window.devicePixelRatio || 1}`,
+			`img: ${
+				renderer.image
+					? `${renderer.image.naturalWidth}x${renderer.image.naturalHeight} complete=${renderer.image.complete}`
+					: "none"
+			}`,
+			`step: ${calibrationStep}`,
+		].join("\n")
+	);
+}
+
+async function rebuildFromLifecycle(reason) {
+	lifecycleDebug(`before ${reason}`);
+
+	// best effort: re-decode image after resume (iOS/Safari)
+	await decodeIfPossible(loadedImgEl || renderer.image);
+
+	// rebuild backing buffer + ctx, then repaint from state
+	renderer.rebuild();
+	rebuildFromState(reason);
+
+	lifecycleDebug(`after ${reason}`);
+}
+
+registerLifecycleRedraw({ rebuild: rebuildFromLifecycle });
 
 // --- Canvas click ---
 canvas.addEventListener("click", (e) => {
@@ -234,11 +333,17 @@ navigator.geolocation.watchPosition(
 
 		// Collect samples for QA/QC
 		collectGPS(avg);
-		updateQAOverlay();
+		qaOverlay.update();
 
-		if (calibrationStep === 2 || calibrationStep === 5) {
+		if (
+			calibrationStep === 2 ||
+			calibrationStep === 5 ||
+			calibrationStep === 7
+		) {
 			const projected = calibration.project(currentGPS);
-			if (projected) renderer.setLivePosition(projected);
+			renderer.setLivePosition(projected || null);
+		} else {
+			renderer.setLivePosition(null);
 		}
 
 		if (calibrationStep === 7 && gpsSamples.length >= 20) {
@@ -248,7 +353,7 @@ navigator.geolocation.watchPosition(
 			});
 
 			lastQAResult = qa;
-			updateQAOverlay();
+			qaOverlay.update();
 			status(`Point A GPS stability: ${(qa.QA * 100).toFixed(0)}%`);
 
 			// advisory: auto-advance to "waiting for B" when stable
@@ -271,7 +376,7 @@ navigator.geolocation.watchPosition(
 			});
 
 			lastQAResult = qa;
-			updateQAOverlay();
+			qaOverlay.update();
 
 			status(`Point A quality: ${(qa.QA * 100).toFixed(0)}%`);
 
@@ -333,28 +438,4 @@ function updateDebugOverlay() {
 			)}m, ${dbg.originWorld.y.toFixed(2)}m)`,
 		].join("\n")
 	);
-}
-
-function updateQAOverlay() {
-	const minSamples = 20;
-
-	// Show QA only in QA steps
-	if (calibrationStep !== 7 && calibrationStep !== 5) {
-		overlays.setQA(null);
-		return;
-	}
-
-	const seconds = Math.max(0, Math.round((Date.now() - qaStartTime) / 1000));
-
-	overlays.setQA({
-		step: calibrationStep,
-		samples: gpsSamples.length,
-		minSamples,
-		seconds,
-		qaPercent: lastQAResult?.QA ?? null,
-		locked: !!lastQAResult?.locked,
-	});
-
-	// ensure it visually updates immediately on mobile
-	renderer.draw();
 }

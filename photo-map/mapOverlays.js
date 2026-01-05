@@ -197,15 +197,6 @@ export class MapOverlays {
 
 		drawCirclePlate(ctx, cx, cy, r);
 		drawCompassNeedle(ctx, cx, cy, nx, ny, r);
-
-		// Optional small N marker near top inside the circle
-		ctx.save();
-		ctx.fillStyle = "rgba(255,255,255,0.9)";
-		ctx.font = "10px system-ui, sans-serif";
-		ctx.textAlign = "center";
-		ctx.textBaseline = "middle";
-		ctx.fillText("N", cx, cy - r * 0.52);
-		ctx.restore();
 	}
 
 	drawScaleBar({ ctx, canvas, renderer, calibration }) {
