@@ -15,7 +15,7 @@ const versionEl = document.getElementById("version");
 // Build version (written by GitHub Pages deploy workflow)
 (async () => {
 	try {
-		const res = await fetch(`./version.json?bust=${Date.now()}`, {
+		const res = await fetch(`/pub/version.json?bust=${Date.now()}`, {
 			cache: "no-store",
 		});
 		if (!res.ok) throw new Error(`HTTP ${res.status}`);
