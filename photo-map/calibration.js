@@ -19,13 +19,19 @@ export class Calibration {
 		this.pointB = { image: imagePt, gps };
 	}
 
-	// --- helper: lat/lon -> local meters ---
-	latLonToMeters(lat, lon, refLat) {
+	// --- helper: lat/lon -> local meters relative to a reference point ---
+	// Returns a local tangent-plane approximation:
+	// +x = east (meters), +y = south (meters) to match image/canvas y-down
+	latLonToMeters(lat, lon, refLat, refLon) {
 		const R = 6378137;
 		const rad = Math.PI / 180;
 
-		const x = lon * rad * R * Math.cos(refLat * rad);
-		const y = -lat * rad * R;
+		const dLat = (lat - refLat) * rad;
+		const dLon = (lon - refLon) * rad;
+
+		const x = dLon * R * Math.cos(refLat * rad);
+		const y = -dLat * R; // north becomes negative => up on screen
+
 		return { x, y };
 	}
 
@@ -33,17 +39,20 @@ export class Calibration {
 		if (!this.pointA || !this.pointB) return;
 
 		const refLat = this.pointA.gps.lat;
+		const refLon = this.pointA.gps.lon;
 
 		const A_m = this.latLonToMeters(
 			this.pointA.gps.lat,
 			this.pointA.gps.lon,
-			refLat
+			refLat,
+			refLon
 		);
 
 		const B_m = this.latLonToMeters(
 			this.pointB.gps.lat,
 			this.pointB.gps.lon,
-			refLat
+			refLat,
+			refLon
 		);
 
 		const dWorldX = B_m.x - A_m.x;
@@ -61,6 +70,11 @@ export class Calibration {
 		const angleImg = Math.atan2(dImgY, dImgX);
 		this.rotation = angleImg - angleWorld;
 
+		console.log("[calib] distWorld", distWorld, "distImg", distImg);
+		console.log("[calib] angleWorld(deg)", (angleWorld * 180) / Math.PI);
+		console.log("[calib] angleImg(deg)", (angleImg * 180) / Math.PI);
+		console.log("[calib] rotation(deg)", (this.rotation * 180) / Math.PI);
+
 		this.originWorld = A_m;
 		this.originImage = this.pointA.image;
 
@@ -71,8 +85,9 @@ export class Calibration {
 		if (!this.ready) return null;
 
 		const refLat = this.pointA.gps.lat;
+		const refLon = this.pointA.gps.lon;
 
-		const p = this.latLonToMeters(gps.lat, gps.lon, refLat);
+		const p = this.latLonToMeters(gps.lat, gps.lon, refLat, refLon);
 
 		const dx = p.x - this.originWorld.x;
 		const dy = p.y - this.originWorld.y;
@@ -86,6 +101,17 @@ export class Calibration {
 		return {
 			x: this.originImage.x + rx * this.scale,
 			y: this.originImage.y + ry * this.scale,
+		};
+	}
+
+	getDebugInfo() {
+		if (!this.ready) return null;
+		return {
+			scale: this.scale,
+			rotationRad: this.rotation,
+			rotationDeg: (this.rotation * 180) / Math.PI,
+			originImage: this.originImage,
+			originWorld: this.originWorld,
 		};
 	}
 }

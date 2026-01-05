@@ -11,6 +11,14 @@ const canvas = document.getElementById("mapCanvas");
 const fileInput = document.getElementById("fileInput");
 const statusEl = document.getElementById("status");
 const versionEl = document.getElementById("version");
+const debugEl = document.getElementById("debug");
+
+let debugEnabled = true;
+
+function setDebug(text) {
+	if (!debugEl) return;
+	debugEl.textContent = debugEnabled ? text : "";
+}
 
 // Build version (written by GitHub Pages deploy workflow)
 (async () => {
@@ -151,6 +159,7 @@ canvas.addEventListener("click", (e) => {
 	if (calibrationStep === 1) {
 		calibration.setPointB(imagePt, currentGPS);
 		calibration.compute();
+		updateDebugOverlay();
 
 		// --- ENTER QA ---
 		gpsSamples.length = 0; // reset samples
@@ -168,6 +177,7 @@ canvas.addEventListener("click", (e) => {
 	if (calibrationStep === 3) {
 		calibration.setPointA(imagePt, currentGPS);
 		calibration.compute();
+		updateDebugOverlay();
 
 		// Restart QA
 		gpsSamples.length = 0;
@@ -183,6 +193,7 @@ canvas.addEventListener("click", (e) => {
 	if (calibrationStep === 4) {
 		calibration.setPointB(imagePt, currentGPS);
 		calibration.compute();
+		updateDebugOverlay();
 		calibrationStep = 2;
 		updateMarkers();
 		status("Point B updated");
@@ -207,6 +218,9 @@ navigator.geolocation.watchPosition(
 		if (!avg) return;
 
 		currentGPS = avg;
+		updateDebugOverlay();
+
+		// Collect samples for QA/QC
 		collectGPS(avg);
 
 		if (calibrationStep === 2 || calibrationStep === 5) {
@@ -271,4 +285,37 @@ navigator.geolocation.watchPosition(
 // --- Service worker ---
 if ("serviceWorker" in navigator) {
 	navigator.serviceWorker.register("./service-worker.js").catch(() => {});
+}
+
+function updateDebugOverlay() {
+	const dbg = calibration.getDebugInfo();
+	if (!dbg) {
+		setDebug(
+			[
+				`step=${calibrationStep}`,
+				currentGPS
+					? `gps=${currentGPS.lat.toFixed(6)}, ${currentGPS.lon.toFixed(6)}`
+					: "gps=null",
+				"calib=not ready",
+			].join("\n")
+		);
+		return;
+	}
+
+	setDebug(
+		[
+			`step=${calibrationStep}`,
+			currentGPS
+				? `gps=${currentGPS.lat.toFixed(6)}, ${currentGPS.lon.toFixed(6)}`
+				: "gps=null",
+			`scale=${dbg.scale.toFixed(6)}`,
+			`rotationDeg=${dbg.rotationDeg.toFixed(2)}`,
+			`originImage=(${dbg.originImage.x.toFixed(
+				1
+			)}, ${dbg.originImage.y.toFixed(1)})`,
+			`originWorld=(${dbg.originWorld.x.toFixed(
+				2
+			)}m, ${dbg.originWorld.y.toFixed(2)}m)`,
+		].join("\n")
+	);
 }
