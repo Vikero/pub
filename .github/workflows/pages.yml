@@ -1,0 +1,47 @@
+name: Deploy to GitHub Pages
+
+on:
+    push:
+          branches: ["main"]
+            workflow_dispatch:
+
+              permissions:
+                  contents: read
+                    pages: write
+                      id-token: write
+
+                      concurrency:
+                          group: "pages"
+                            cancel-in-progress: true
+
+                            jobs:
+                                build:
+                                      runs-on: ubuntu-latest
+                                          steps:
+                                                  - name: Checkout
+                                                          uses: actions/checkout@v4
+
+                                                                - name: Generate version.json
+                                                                        run: |
+                                                                                    SHA="$(git rev-parse --short HEAD)"
+                                                                                              BUILT_AT="$(date -u '+%Y-%m-%d %H:%M UTC')"
+                                                                                                        cat > version.json <<EOF
+                                                                                                                  {
+                                                                                                                                "sha": "$SHA",
+                                                                                                                                            "builtAt": "$BUILT_AT"
+                                                                                                                                                      }
+                                                                                                                                                                EOF
+
+                                                                                                                                                                      - name: Upload artifact
+                                                                                                                                                                              uses: actions/upload-pages-artifact@v3
+                                                                                                                                                                                      with:
+                                                                                                                                                                                                  path: .
+
+                                                                                                                                                                                                    deploy:
+                                                                                                                                                                                                          needs: build
+                                                                                                                                                                                                              runs-on: ubuntu-latest
+                                                                                                                                                                                                                  environment:
+                                                                                                                                                                                                                          name: github-pages
+                                                                                                                                                                                                                              steps:
+                                                                                                                                                                                                                                      - name: Deploy to GitHub Pages
+                                                                                                                                                                                                                                              uses: actions/deploy-pages@v4
