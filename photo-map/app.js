@@ -234,6 +234,7 @@ navigator.geolocation.watchPosition(
 
 		// Collect samples for QA/QC
 		collectGPS(avg);
+		updateQAOverlay();
 
 		if (calibrationStep === 2 || calibrationStep === 5) {
 			const projected = calibration.project(currentGPS);
@@ -247,6 +248,7 @@ navigator.geolocation.watchPosition(
 			});
 
 			lastQAResult = qa;
+			updateQAOverlay();
 			status(`Point A GPS stability: ${(qa.QA * 100).toFixed(0)}%`);
 
 			// advisory: auto-advance to "waiting for B" when stable
@@ -269,6 +271,7 @@ navigator.geolocation.watchPosition(
 			});
 
 			lastQAResult = qa;
+			updateQAOverlay();
 
 			status(`Point A quality: ${(qa.QA * 100).toFixed(0)}%`);
 
@@ -330,4 +333,28 @@ function updateDebugOverlay() {
 			)}m, ${dbg.originWorld.y.toFixed(2)}m)`,
 		].join("\n")
 	);
+}
+
+function updateQAOverlay() {
+	const minSamples = 20;
+
+	// Show QA only in QA steps
+	if (calibrationStep !== 7 && calibrationStep !== 5) {
+		overlays.setQA(null);
+		return;
+	}
+
+	const seconds = Math.max(0, Math.round((Date.now() - qaStartTime) / 1000));
+
+	overlays.setQA({
+		step: calibrationStep,
+		samples: gpsSamples.length,
+		minSamples,
+		seconds,
+		qaPercent: lastQAResult?.QA ?? null,
+		locked: !!lastQAResult?.locked,
+	});
+
+	// ensure it visually updates immediately on mobile
+	renderer.draw();
 }

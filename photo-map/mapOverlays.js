@@ -89,18 +89,92 @@ export class MapOverlays {
 		this.enabled = true;
 		this.showNorthArrow = true;
 		this.showScaleBar = true;
+
+		// NEW
+		this.showQA = true;
+		this.qa = null; // { step, samples, minSamples, seconds, qaPercent, locked }
+	}
+
+	// NEW
+	setQA(qaState) {
+		this.qa = qaState;
 	}
 
 	draw({ ctx, canvas, renderer, calibration }) {
 		if (!this.enabled) return;
-		if (!calibration?.ready) return;
 
 		ctx.save();
 		ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-		if (this.showNorthArrow) this.drawNorthArrow({ ctx, canvas, calibration });
-		if (this.showScaleBar)
-			this.drawScaleBar({ ctx, canvas, renderer, calibration });
+		// QA should be visible even before calibration is ready
+		if (this.showQA) this.drawQA({ ctx, canvas });
+
+		// These require calibration
+		if (calibration?.ready) {
+			if (this.showNorthArrow)
+				this.drawNorthArrow({ ctx, canvas, calibration });
+			if (this.showScaleBar)
+				this.drawScaleBar({ ctx, canvas, renderer, calibration });
+		}
+
+		ctx.restore();
+	}
+
+	// NEW
+	drawQA({ ctx, canvas }) {
+		if (!this.qa) return;
+
+		const pad = 12;
+		const x = pad;
+		const y = pad + 60;
+
+		const w = 170;
+		const h = 54;
+
+		const { step, samples, minSamples, seconds, qaPercent, locked } = this.qa;
+
+		let title = "";
+		if (step === 7) title = "QA: A stability";
+		else if (step === 5) title = "QA: A quality";
+		else return;
+
+		const progress =
+			minSamples > 0 ? Math.min(1, (samples || 0) / minSamples) : 0;
+
+		ctx.save();
+		ctx.fillStyle = "rgba(0,0,0,0.35)";
+		ctx.fillRect(x, y, w, h);
+
+		ctx.strokeStyle = "rgba(255,255,255,0.18)";
+		ctx.lineWidth = 1;
+		ctx.strokeRect(x, y, w, h);
+
+		ctx.fillStyle = "rgba(255,255,255,0.95)";
+		ctx.font = "12px system-ui, sans-serif";
+		ctx.textAlign = "left";
+		ctx.textBaseline = "top";
+		ctx.fillText(title, x + 8, y + 6);
+
+		const line2 =
+			qaPercent != null
+				? `${(qaPercent * 100).toFixed(0)}%${locked ? " (locked)" : ""}`
+				: `${samples}/${minSamples} samples • ${seconds}s`;
+
+		ctx.font = "11px system-ui, sans-serif";
+		ctx.fillStyle = "rgba(255,255,255,0.85)";
+		ctx.fillText(line2, x + 8, y + 24);
+
+		// progress bar
+		const bx = x + 8;
+		const by = y + 40;
+		const bw = w - 16;
+		const bh = 8;
+
+		ctx.fillStyle = "rgba(255,255,255,0.18)";
+		ctx.fillRect(bx, by, bw, bh);
+
+		ctx.fillStyle = locked ? "rgba(70,200,120,0.95)" : "rgba(255,255,255,0.75)";
+		ctx.fillRect(bx, by, bw * progress, bh);
 
 		ctx.restore();
 	}
@@ -126,7 +200,7 @@ export class MapOverlays {
 
 		// Optional small N marker near top inside the circle
 		ctx.save();
-		ctx.fillStyle = "rgba(188, 34, 34, 0.9)";
+		ctx.fillStyle = "rgba(255,255,255,0.9)";
 		ctx.font = "10px system-ui, sans-serif";
 		ctx.textAlign = "center";
 		ctx.textBaseline = "middle";
@@ -168,7 +242,7 @@ export class MapOverlays {
 
 		// bar
 		ctx.strokeStyle = "rgba(255,255,255,0.95)";
-		ctx.lineWidth = 4;
+		ctx.lineWidth = 2;
 		ctx.lineCap = "butt";
 		ctx.beginPath();
 		ctx.moveTo(barX, barY);
@@ -176,12 +250,12 @@ export class MapOverlays {
 		ctx.stroke();
 
 		// ticks
-		ctx.lineWidth = 3;
+		ctx.lineWidth = 2;
 		ctx.beginPath();
-		ctx.moveTo(barX, barY - 6);
-		ctx.lineTo(barX, barY + 6);
-		ctx.moveTo(barX + barPx, barY - 6);
-		ctx.lineTo(barX + barPx, barY + 6);
+		ctx.moveTo(barX, barY - 5);
+		ctx.lineTo(barX, barY + 5);
+		ctx.moveTo(barX + barPx, barY - 5);
+		ctx.lineTo(barX + barPx, barY + 5);
 		ctx.stroke();
 
 		// label
