@@ -12,9 +12,19 @@ const fileInput = document.getElementById("fileInput");
 const statusEl = document.getElementById("status");
 const versionEl = document.getElementById("version");
 
-// Local date + time (user’s locale)
-const now = new Date();
-versionEl.textContent = `(v${now.toLocaleString()})`;
+// Build version (written by GitHub Pages deploy workflow)
+(async () => {
+	try {
+		const res = await fetch(`./version.json?bust=${Date.now()}`, {
+			cache: "no-store",
+		});
+		if (!res.ok) throw new Error(`HTTP ${res.status}`);
+		const v = await res.json();
+		versionEl.textContent = `(${v.builtAt} @ ${v.sha})`;
+	} catch {
+		versionEl.textContent = "(dev)";
+	}
+})();
 
 // --- Core ---
 const renderer = new Renderer(canvas);
