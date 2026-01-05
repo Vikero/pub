@@ -25,6 +25,8 @@ let calibrationStep = 0;
 
 let currentGPS = null;
 let gpsSamples = []; // buffer for QA / QC
+let qaStartTime = 0;
+let lastQAResult = null;
 
 // --- Helpers ---
 function status(msg) {
@@ -91,7 +93,7 @@ canvas.addEventListener("click", (e) => {
 
 	// Marker selection (edit mode)
 	const hit = renderer.getMarkerAt(screenPt);
-	if (hit && calibrationStep === 2) {
+	if (hit && (calibrationStep === 2 || calibrationStep === 5)) {
 		calibrationStep = hit.id === "A" ? 3 : 4;
 		gpsSmoother.reset();
 		status(`Tap new location for point ${hit.id}`);
@@ -118,20 +120,31 @@ canvas.addEventListener("click", (e) => {
 		calibration.setPointB(imagePt, currentGPS);
 		calibration.compute();
 
-		gpsSamples.length = 0; // reset buffer
-		calibrationStep = 5; // VALIDATE A
+		// --- ENTER QA ---
+		gpsSamples.length = 0; // reset samples
+		qaStartTime = Date.now();
+		lastQAResult = null;
+
+		calibrationStep = 5; // validating A
 		status("Stand still on point A to validate calibration");
 		updateMarkers();
 		return;
 	}
 
 	// Editing A or B
+
 	if (calibrationStep === 3) {
 		calibration.setPointA(imagePt, currentGPS);
 		calibration.compute();
-		calibrationStep = 2;
+
+		// Restart QA
+		gpsSamples.length = 0;
+		qaStartTime = Date.now();
+		lastQAResult = null;
+
+		calibrationStep = 5;
 		updateMarkers();
-		status("Point A updated");
+		status("Point A updated. Stand still to re-validate");
 		return;
 	}
 
@@ -164,11 +177,14 @@ navigator.geolocation.watchPosition(
 		currentGPS = avg;
 		collectGPS(avg);
 
-		if (calibrationStep === 2) {
+		if (calibrationStep === 2 || calibrationStep === 5) {
 			const projected = calibration.project(currentGPS);
 			if (projected) renderer.setLivePosition(projected);
 		}
 
+		// ----------------------------
+		// Phase 4.1 — QA loop
+		// ----------------------------
 		if (calibrationStep === 5 && gpsSamples.length >= 20) {
 			const qa = computePointAQuality({
 				gpsSamples,
@@ -177,14 +193,19 @@ navigator.geolocation.watchPosition(
 				projectWorldToImage: calibration.project.bind(calibration),
 			});
 
+			lastQAResult = qa;
+
 			status(`Point A quality: ${(qa.QA * 100).toFixed(0)}%`);
 
+			// Auto-lock only if truly good
 			if (qa.locked) {
-				calibration.lockPointA?.(); // optional method
-				calibrationStep = 2; // navigation
+				calibrationStep = 2;
 				gpsSamples.length = 0;
-				status("Calibration locked. Navigation active");
+				status("Calibration validated. Navigation active");
 			}
+		}
+		if (calibrationStep === 5 && Date.now() - qaStartTime > 20000) {
+			status("QA inconclusive — you may adjust point A");
 		}
 	},
 	(err) => {
