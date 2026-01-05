@@ -16,6 +16,7 @@ export class Renderer {
 
 		window.addEventListener("resize", () => this.resize());
 		this.bindEvents();
+		this.afterDraw = null; // optional callback(ctx)
 	}
 
 	setImage(img) {
@@ -30,6 +31,11 @@ export class Renderer {
 
 	setLivePosition(pt) {
 		this.livePosition = pt;
+		this.draw();
+	}
+
+	setAfterDraw(fn) {
+		this.afterDraw = fn;
 		this.draw();
 	}
 
@@ -173,6 +179,11 @@ export class Renderer {
 				Math.PI * 2
 			);
 			this.ctx.fill();
+		}
+
+		// draw overlays in screen space
+		if (typeof this.afterDraw === "function") {
+			this.afterDraw(this.ctx);
 		}
 	}
 }

@@ -1,6 +1,7 @@
 import { Renderer } from "./render.js";
 import { Calibration } from "./calibration.js";
 import { GPSSmoother } from "./gpsSmoother.js";
+import { MapOverlays } from "./mapOverlays.js";
 import {
 	computePointAQuality,
 	computePointAStabilityQuality,
@@ -38,6 +39,17 @@ function setDebug(text) {
 const renderer = new Renderer(canvas);
 const calibration = new Calibration();
 const gpsSmoother = new GPSSmoother(5);
+
+const overlays = new MapOverlays();
+
+renderer.setAfterDraw((ctx) => {
+	overlays.draw({
+		ctx,
+		canvas,
+		renderer,
+		calibration,
+	});
+});
 
 // --- App state ---
 // 0 = waiting for A
