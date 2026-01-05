@@ -58,7 +58,20 @@ canvas {
 }
 
 #status {
+  padding: 0.5rem;
   margin-top: 0.5rem;
   font-size: 0.9rem;
   color: #9f9;
+}
+
+#statusRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+#version {
+  font-size: 0.8rem;
+  color: #f4dede;
+  padding: 0 0.5rem;
 }

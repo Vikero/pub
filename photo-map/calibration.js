@@ -23,8 +23,9 @@ export class Calibration {
 	latLonToMeters(lat, lon, refLat) {
 		const R = 6378137;
 		const rad = Math.PI / 180;
+
 		const x = lon * rad * R * Math.cos(refLat * rad);
-		const y = lat * rad * R;
+		const y = -lat * rad * R;
 		return { x, y };
 	}
 

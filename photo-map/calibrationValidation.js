@@ -29,6 +29,33 @@ function distanceMeters(a, b) {
 
 //
 // ==============================
+// Phase 4.1a — Point A Stability (pre-B)
+// ==============================
+// No projection required; just checks whether GPS is stable while standing on A.
+//
+export function computePointAStabilityQuality({
+	gpsSamples, // [{lat, lon}]
+	pointAWorld, // {lat, lon}
+}) {
+	if (!gpsSamples || gpsSamples.length < 10) {
+		return { QA: 0, locked: false, sigma: null };
+	}
+
+	const distances = gpsSamples.map((p) => distanceMeters(p, pointAWorld));
+	const sigma = stdDev(distances);
+
+	// tighter than the post-B stability if you want quick feedback
+	const QA = clamp(1 - sigma / 10);
+
+	return {
+		QA,
+		sigma,
+		locked: QA >= 0.85,
+	};
+}
+
+//
+// ==============================
 // Phase 4.1 — Point A Validation
 // ==============================
 //
