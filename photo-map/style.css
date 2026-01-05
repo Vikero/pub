@@ -75,3 +75,12 @@ canvas {
   color: #f4dede;
   padding: 0 0.5rem;
 }
+
+/* ...existing code... */
+
+#debug {
+  pointer-events: none;
+  /* don't block taps on the canvas */
+  user-select: text;
+  /* optional: keep it selectable if you long-press (may not work with pointer-events none) */
+}
