@@ -22,10 +22,11 @@ export function loadAutosave() {
 	}
 }
 
-export function saveAutosave({ calibrationStep, pointA, pointB }) {
+export function saveAutosave({ calibrationStep, pointA, pointB, imageName }) {
 	const state = {
 		v: 1,
 		savedAt: Date.now(),
+		imageName: imageName ?? null,
 		calibrationStep: calibrationStep ?? 0,
 		pointA: pointA
 			? {

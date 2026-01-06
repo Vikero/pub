@@ -15,6 +15,11 @@ const statusEl = document.getElementById("status");
 const versionEl = document.getElementById("version");
 const debugEl = document.getElementById("debug");
 
+// Allow re-selecting the same file: many browsers won't fire "change" if it's the same file
+fileInput.addEventListener("click", () => {
+	fileInput.value = "";
+});
+
 let debugEnabled = true;
 
 function setDebug(text) {
@@ -69,11 +74,12 @@ let qaStartTime = 0;
 let lastQAResult = null;
 
 // --- Minimal autosave ---
-function autosaveNow() {
+function autosaveNow(imageNameOverride = null) {
 	saveAutosave({
 		calibrationStep,
 		pointA: calibration.pointA,
 		pointB: calibration.pointB,
+		imageName: imageNameOverride ?? fileInput?.files?.[0]?.name ?? null,
 	});
 }
 
@@ -84,10 +90,7 @@ function autosaveNow() {
 
 	calibration.reset();
 
-	if (saved.pointA) {
-		calibration.setPointA(saved.pointA.image, saved.pointA.gps);
-	}
-
+	if (saved.pointA) calibration.setPointA(saved.pointA.image, saved.pointA.gps);
 	if (saved.pointB) {
 		calibration.setPointB(saved.pointB.image, saved.pointB.gps);
 		calibration.compute();
@@ -95,7 +98,8 @@ function autosaveNow() {
 
 	calibrationStep = saved.calibrationStep ?? 0;
 
-	status("Session restored. Re-select the same photo to continue.");
+	const hint = saved.imageName ? ` Re-select: "${saved.imageName}".` : "";
+	status(`Session restored.${hint}`);
 })();
 
 // --- Helpers ---
@@ -144,6 +148,9 @@ fileInput.addEventListener("change", (e) => {
 		URL.revokeObjectURL(url);
 		renderer.setImage(img);
 
+		// Persist which image the user picked (name only)
+		autosaveNow(file.name);
+
 		const hasRestoredCalib = !!(calibration.pointA || calibration.pointB);
 
 		// If autosave was restored, user may be loading a different photo.
@@ -157,7 +164,8 @@ fileInput.addEventListener("change", (e) => {
 				if (calibration.pointA && calibration.pointB) calibration.compute();
 				updateMarkers();
 				updateDebugOverlay();
-				status("Photo loaded. Session restored.");
+
+				status(`Photo loaded. Session restored. (${file.name})`);
 				return;
 			}
 
@@ -178,11 +186,13 @@ fileInput.addEventListener("change", (e) => {
 		renderer.setLivePosition(null);
 
 		status("Tap first calibration point while standing there");
+		fileInput.value = "";
 	};
 
 	img.onerror = () => {
 		URL.revokeObjectURL(url);
 		status("Failed to load image");
+		fileInput.value = "";
 	};
 
 	img.src = url;
