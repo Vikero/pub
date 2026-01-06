@@ -10,6 +10,7 @@ import {
 	registerLifecycleRedraw,
 	createQAOverlayController,
 } from "./uiLifecycle.js";
+import { loadAutosave, saveAutosave } from "./autosave.js";
 
 // --- DOM ---
 const canvas = document.getElementById("mapCanvas");
@@ -75,6 +76,32 @@ let lastQAResult = null;
 function status(msg) {
 	statusEl.textContent = msg;
 }
+
+function autosaveNow() {
+	// minimal: just calibration step and A/B points
+	saveAutosave({
+		calibrationStep,
+		pointA: calibration.pointA,
+		pointB: calibration.pointB,
+	});
+}
+
+// Restore autosaved calibration into memory at startup (image still must be re-selected)
+(function restoreAutosaveOnBoot() {
+	const saved = loadAutosave();
+	if (!saved) return;
+
+	calibration.reset();
+	if (saved.pointA) calibration.setPointA(saved.pointA.image, saved.pointA.gps);
+	if (saved.pointB) {
+		calibration.setPointB(saved.pointB.image, saved.pointB.gps);
+		calibration.compute();
+	}
+	calibrationStep = saved.calibrationStep ?? 0;
+
+	status("Session restored. Please re-select the same photo to continue.");
+	updateDebugOverlay();
+})();
 
 function updateMarkers() {
 	const markers = [];
@@ -248,6 +275,7 @@ canvas.addEventListener("click", (e) => {
 	// Initial calibration
 	if (calibrationStep === 0) {
 		calibration.setPointA(imagePt, currentGPS);
+		autosaveNow();
 
 		// ENTER pre-B QA (stability only)
 		gpsSamples.length = 0;
@@ -270,6 +298,7 @@ canvas.addEventListener("click", (e) => {
 	if (calibrationStep === 1) {
 		calibration.setPointB(imagePt, currentGPS);
 		calibration.compute();
+		autosaveNow();
 		updateDebugOverlay();
 
 		// --- ENTER QA ---
@@ -288,6 +317,7 @@ canvas.addEventListener("click", (e) => {
 	if (calibrationStep === 3) {
 		calibration.setPointA(imagePt, currentGPS);
 		calibration.compute();
+		autosaveNow();
 		updateDebugOverlay();
 
 		// Restart QA
@@ -304,6 +334,7 @@ canvas.addEventListener("click", (e) => {
 	if (calibrationStep === 4) {
 		calibration.setPointB(imagePt, currentGPS);
 		calibration.compute();
+		autosaveNow();
 		updateDebugOverlay();
 		calibrationStep = 2;
 		updateMarkers();
@@ -359,6 +390,7 @@ navigator.geolocation.watchPosition(
 			// advisory: auto-advance to "waiting for B" when stable
 			if (qa.locked) {
 				calibrationStep = 1;
+				autosaveNow();
 				gpsSamples.length = 0;
 				status("A looks stable. Walk to point B and tap.");
 			}
@@ -383,6 +415,7 @@ navigator.geolocation.watchPosition(
 			// Auto-lock only if truly good
 			if (qa.locked) {
 				calibrationStep = 2;
+				autosaveNow();
 				gpsSamples.length = 0;
 				status("Calibration validated. Navigation active");
 			}
