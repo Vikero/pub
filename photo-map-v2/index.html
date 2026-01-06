@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PhotoMap Navigator</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="./favicon-16x16.png">
+  <link rel="manifest" href="../site.webmanifest">
+</head>
+
+<body>
+  <input type="file" id="fileInput" accept="image/*">
+
+  <div id="statusRow">
+    <span id="status">Load a map image to start</span>
+    <span id="version">(0)</span>
+  </div>
+
+  <pre id="debug" style="margin:8px 0; font-size:12px; opacity:.85; white-space:pre-wrap;"></pre>
+
+  <canvas id="mapCanvas"></canvas>
+
+  <script type="module" src="app.js"></script>
+</body>
+
+</html>
