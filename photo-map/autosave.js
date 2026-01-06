@@ -14,24 +14,15 @@ export function loadAutosave() {
 	try {
 		const raw = localStorage.getItem(AUTOSAVE_KEY);
 		if (!raw) return null;
-		const parsed = JSON.parse(raw);
-		if (!parsed || parsed.v !== 1) return null;
-		return parsed;
+		const data = JSON.parse(raw);
+		if (!data || data.v !== 1) return null;
+		return data;
 	} catch {
 		return null;
 	}
 }
 
-export function clearAutosave() {
-	try {
-		localStorage.removeItem(AUTOSAVE_KEY);
-	} catch {
-		// ignore
-	}
-}
-
 export function saveAutosave({ calibrationStep, pointA, pointB }) {
-	/** @type {AutosaveState} */
 	const state = {
 		v: 1,
 		savedAt: Date.now(),
@@ -56,4 +47,10 @@ export function saveAutosave({ calibrationStep, pointA, pointB }) {
 	} catch {
 		return false;
 	}
+}
+
+export function clearAutosave() {
+	try {
+		localStorage.removeItem(AUTOSAVE_KEY);
+	} catch {}
 }
