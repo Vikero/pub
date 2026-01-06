@@ -138,20 +138,35 @@ fileInput.addEventListener("change", (e) => {
 	if (!file) return;
 
 	const img = new Image();
+	const url = URL.createObjectURL(file);
+
 	img.onload = () => {
+		URL.revokeObjectURL(url);
 		renderer.setImage(img);
 
-		// If we have restored calibration points, keep them and repaint markers.
-		if (calibration.pointA || calibration.pointB) {
-			if (calibration.pointA && calibration.pointB) calibration.compute();
-			updateMarkers();
-			updateDebugOverlay();
-			status("Photo loaded. Session restored.");
-			return;
+		const hasRestoredCalib = !!(calibration.pointA || calibration.pointB);
+
+		// If autosave was restored, user may be loading a different photo.
+		// Ask whether to keep restored calibration.
+		if (hasRestoredCalib) {
+			const keep = confirm(
+				"Restore previous calibration on this photo?\n\nOK = Restore markers\nCancel = Start new session (clears saved calibration)"
+			);
+
+			if (keep) {
+				if (calibration.pointA && calibration.pointB) calibration.compute();
+				updateMarkers();
+				updateDebugOverlay();
+				status("Photo loaded. Session restored.");
+				return;
+			}
+
+			// Start fresh: clear stored calibration + reset in-memory.
+			calibration.reset();
+			clearAutosave();
 		}
 
-		// Otherwise start fresh
-		calibration.reset();
+		// Start fresh (either no restored calib, or user chose to clear)
 		gpsSmoother.reset();
 		calibrationStep = 0;
 		currentGPS = null;
@@ -161,13 +176,17 @@ fileInput.addEventListener("change", (e) => {
 
 		renderer.setMarkers([]);
 		renderer.setLivePosition(null);
-		clearAutosave();
 
 		status("Tap first calibration point while standing there");
 	};
-	img.src = URL.createObjectURL(file);
-});
 
+	img.onerror = () => {
+		URL.revokeObjectURL(url);
+		status("Failed to load image");
+	};
+
+	img.src = url;
+});
 // --- Canvas click ---
 canvas.addEventListener("click", (e) => {
 	if (!renderer.image) return;
